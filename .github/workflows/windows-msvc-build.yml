@@ -1,11 +1,12 @@
-name: Windows MSVC build (PostgreSQL 18, EDB)
+name: Windows MSVC build (PostgreSQL 18, built from source)
 
 on:
   workflow_dispatch:
   push:
 
 env:
-  PGROOT: C:\Program Files\PostgreSQL\18
+  PGROOT: C:\pg18
+  PG_VERSION: 18.0
   REPACK_VERSION: 1.5.3
 
 jobs:
@@ -14,26 +15,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install EDB PostgreSQL 18 (headers and libs)
-        shell: pwsh
-        run: |
-          choco install postgresql18 --yes --no-progress --params "/Password:ci-only-password"
-          if (-not (Test-Path "$env:PGROOT\include\server\c.h")) { throw "PostgreSQL 18 dev files not found in $env:PGROOT" }
-
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Detect PostgreSQL import/static libraries
+      - name: Install build tools (meson, ninja, bison, flex)
         shell: pwsh
         run: |
-          Get-ChildItem "$env:PGROOT\lib" -Filter *.lib | Select-Object -ExpandProperty Name
-          $common = Get-ChildItem "$env:PGROOT\lib" -Filter *pgcommon*.lib | Sort-Object { $_.Name -like '*_shlib*' } | Select-Object -First 1
-          $port   = Get-ChildItem "$env:PGROOT\lib" -Filter *pgport*.lib   | Sort-Object { $_.Name -like '*_shlib*' } | Select-Object -First 1
-          if (-not $common -or -not $port) { throw "pgcommon/pgport libs not found in $env:PGROOT\lib (see list above)" }
-          "PGCOMMON_LIB=$($common.Name)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "PGPORT_LIB=$($port.Name)"     | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "Using $($common.Name) and $($port.Name)"
+          python -m pip install --quiet meson ninja
+          choco install winflexbison3 --yes --no-progress
+          meson --version
+
+      - name: Download PostgreSQL source
+        shell: pwsh
+        run: |
+          $v = $env:PG_VERSION
+          Invoke-WebRequest "https://ftp.postgresql.org/pub/source/v$v/postgresql-$v.tar.gz" -OutFile pg.tar.gz
+          tar -xzf pg.tar.gz
+          Rename-Item "postgresql-$v" pgsrc
+
+      - name: Build and install PostgreSQL (headers and libs)
+        shell: cmd
+        run: |
+          cd pgsrc
+          meson setup build --prefix=%PGROOT% --buildtype=release -Dnls=disabled -Dssl=none -Dzlib=disabled -Dicu=disabled -Dreadline=disabled -Dlz4=disabled -Dzstd=disabled -Dtap_tests=disabled
+          if errorlevel 1 exit /b 1
+          meson compile -C build
+          if errorlevel 1 exit /b 1
+          meson install -C build
+          if errorlevel 1 exit /b 1
+
+      - name: Locate PostgreSQL libraries
+        shell: pwsh
+        run: |
+          Get-ChildItem $env:PGROOT\lib -Recurse | Select-Object -ExpandProperty FullName
+          function Find-Lib($pattern) {
+            $f = Get-ChildItem pgsrc\build, $env:PGROOT -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match $pattern } | Select-Object -First 1
+            if (-not $f) { throw "library matching $pattern not found" }
+            $f.FullName
+          }
+          $common = Find-Lib '^(lib)?pgcommon\.(lib|a)$'
+          $port   = Find-Lib '^(lib)?pgport\.(lib|a)$'
+          $pq     = Find-Lib '^libpq\.lib$'
+          $pgexe  = Find-Lib '^postgres\.lib$'
+          "PGCOMMON_LIB=$common" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "PGPORT_LIB=$port"     | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "LIBPQ_LIB=$pq"        | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "POSTGRES_LIB=$pgexe"  | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "common=$common port=$port pq=$pq postgres=$pgexe"
 
       - name: Build pg_repack.exe and pg_repack.dll
         shell: cmd
@@ -45,13 +75,13 @@ jobs:
           rem ---- client: pg_repack.exe
           cl /nologo /O2 /MD /Fe:dist\pg_repack.exe %DEFS% /DFRONTEND %INC% /I bin /I . ^
              bin\pg_repack.c bin\pgut\pgut.c bin\pgut\pgut-fe.c ^
-             /link /LIBPATH:"%PGROOT%\lib" libpq.lib %PGCOMMON_LIB% %PGPORT_LIB% ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
+             /link "%LIBPQ_LIB%" "%PGCOMMON_LIB%" "%PGPORT_LIB%" ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
           if errorlevel 1 exit /b 1
 
           rem ---- server extension: pg_repack.dll
           cl /nologo /O2 /MD /LD /Fe:dist\pg_repack.dll %DEFS% %INC% /I lib /I . ^
              lib\repack.c lib\pgut\pgut-spi.c ^
-             /link /LIBPATH:"%PGROOT%\lib" postgres.lib ws2_32.lib
+             /link "%POSTGRES_LIB%" ws2_32.lib
           if errorlevel 1 exit /b 1
 
       - name: Generate extension SQL and control files
@@ -62,11 +92,7 @@ jobs:
             Set-Content -NoNewline "dist/pg_repack--$v.sql"
           (Get-Content lib/pg_repack.control.in -Raw) -replace 'REPACK_VERSION',$v |
             Set-Content -NoNewline dist/pg_repack.control
-          # client needs libpq at runtime
           Copy-Item "$env:PGROOT\bin\libpq.dll" dist\
-          foreach ($d in 'libssl-3-x64.dll','libcrypto-3-x64.dll','libintl-9.dll','libiconv-2.dll') {
-            if (Test-Path "$env:PGROOT\bin\$d") { Copy-Item "$env:PGROOT\bin\$d" dist\ }
-          }
           Get-ChildItem dist
 
       - uses: actions/upload-artifact@v4
