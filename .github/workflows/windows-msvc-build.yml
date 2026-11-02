@@ -6,8 +6,8 @@ on:
 
 env:
   PGROOT: C:\pg18
-  PG_VERSION: 18.0
-  REPACK_VERSION: 1.5.3
+  PG_VERSION: "18.6"
+  REPACK_VERSION: "1.5.3"
 
 jobs:
   build:
