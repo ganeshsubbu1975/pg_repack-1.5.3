@@ -24,6 +24,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Detect PostgreSQL import/static libraries
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:PGROOT\lib" -Filter *.lib | Select-Object -ExpandProperty Name
+          $common = Get-ChildItem "$env:PGROOT\lib" -Filter *pgcommon*.lib | Sort-Object { $_.Name -like '*_shlib*' } | Select-Object -First 1
+          $port   = Get-ChildItem "$env:PGROOT\lib" -Filter *pgport*.lib   | Sort-Object { $_.Name -like '*_shlib*' } | Select-Object -First 1
+          if (-not $common -or -not $port) { throw "pgcommon/pgport libs not found in $env:PGROOT\lib (see list above)" }
+          "PGCOMMON_LIB=$($common.Name)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "PGPORT_LIB=$($port.Name)"     | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "Using $($common.Name) and $($port.Name)"
+
       - name: Build pg_repack.exe and pg_repack.dll
         shell: cmd
         run: |
@@ -34,7 +45,7 @@ jobs:
           rem ---- client: pg_repack.exe
           cl /nologo /O2 /MD /Fe:dist\pg_repack.exe %DEFS% /DFRONTEND %INC% /I bin /I . ^
              bin\pg_repack.c bin\pgut\pgut.c bin\pgut\pgut-fe.c ^
-             /link /LIBPATH:"%PGROOT%\lib" libpq.lib libpgcommon.lib libpgport.lib ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
+             /link /LIBPATH:"%PGROOT%\lib" libpq.lib %PGCOMMON_LIB% %PGPORT_LIB% ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
           if errorlevel 1 exit /b 1
 
           rem ---- server extension: pg_repack.dll
