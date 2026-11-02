@@ -1,0 +1,64 @@
+name: Windows MSVC build (PostgreSQL 18, EDB)
+
+on:
+  workflow_dispatch:
+  push:
+
+env:
+  PGROOT: C:\Program Files\PostgreSQL\18
+  REPACK_VERSION: 1.5.3
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install EDB PostgreSQL 18 (headers and libs)
+        shell: pwsh
+        run: |
+          choco install postgresql18 --yes --no-progress --params "/Password:ci-only-password"
+          if (-not (Test-Path "$env:PGROOT\include\server\c.h")) { throw "PostgreSQL 18 dev files not found in $env:PGROOT" }
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build pg_repack.exe and pg_repack.dll
+        shell: cmd
+        run: |
+          mkdir dist
+          set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal"
+          set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN
+
+          rem ---- client: pg_repack.exe
+          cl /nologo /O2 /MD /Fe:dist\pg_repack.exe %DEFS% /DFRONTEND %INC% /I bin /I . ^
+             bin\pg_repack.c bin\pgut\pgut.c bin\pgut\pgut-fe.c ^
+             /link /LIBPATH:"%PGROOT%\lib" libpq.lib libpgcommon.lib libpgport.lib ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
+          if errorlevel 1 exit /b 1
+
+          rem ---- server extension: pg_repack.dll
+          cl /nologo /O2 /MD /LD /Fe:dist\pg_repack.dll %DEFS% %INC% /I lib /I . ^
+             lib\repack.c lib\pgut\pgut-spi.c ^
+             /link /LIBPATH:"%PGROOT%\lib" postgres.lib ws2_32.lib
+          if errorlevel 1 exit /b 1
+
+      - name: Generate extension SQL and control files
+        shell: pwsh
+        run: |
+          $v = $env:REPACK_VERSION
+          (Get-Content lib/pg_repack.sql.in -Raw) -replace 'REPACK_VERSION',$v -replace 'relhasoids','false' |
+            Set-Content -NoNewline "dist/pg_repack--$v.sql"
+          (Get-Content lib/pg_repack.control.in -Raw) -replace 'REPACK_VERSION',$v |
+            Set-Content -NoNewline dist/pg_repack.control
+          # client needs libpq at runtime
+          Copy-Item "$env:PGROOT\bin\libpq.dll" dist\
+          foreach ($d in 'libssl-3-x64.dll','libcrypto-3-x64.dll','libintl-9.dll','libiconv-2.dll') {
+            if (Test-Path "$env:PGROOT\bin\$d") { Copy-Item "$env:PGROOT\bin\$d" dist\ }
+          }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pg_repack-1.5.3-windows-x64-pg18
+          path: dist/

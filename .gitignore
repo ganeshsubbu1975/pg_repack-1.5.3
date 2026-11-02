@@ -1,0 +1,10 @@
+# Global excludes across all subdirectories
+*.o
+*.so
+*.bc
+*.dylib
+regress/regression.diffs
+regress/regression.out
+regress/results/
+dist/*.zip
+lib/exports.list
