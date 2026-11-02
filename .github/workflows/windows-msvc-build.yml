@@ -69,7 +69,7 @@ jobs:
         shell: cmd
         run: |
           mkdir dist
-          set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal"
+          set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal" /I"%CD%\pgsrc\src\include" /I"%CD%\pgsrc\build\src\include"
           set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN
 
           rem ---- client: pg_repack.exe
