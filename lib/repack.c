@@ -64,7 +64,25 @@
 #include "utils/ruleutils.h"
 #endif
 
+#if defined(_MSC_VER) && PG_VERSION_NUM >= 180000
+/*
+ * MSVC mis-expands PG_MODULE_MAGIC_DATA(.name = NULL) when building against
+ * PostgreSQL 18, so spell out what PG_MODULE_MAGIC would generate.
+ */
+extern PGDLLEXPORT const Pg_magic_struct *PG_MAGIC_FUNCTION_NAME(void);
+const Pg_magic_struct *
+PG_MAGIC_FUNCTION_NAME(void)
+{
+	static const Pg_magic_struct Pg_magic_data = {
+		.len = sizeof(Pg_magic_struct),
+		.abi_fields = PG_MODULE_ABI_DATA,
+		.name = NULL
+	};
+	return &Pg_magic_data;
+}
+#else
 PG_MODULE_MAGIC;
+#endif
 
 extern Datum PGUT_EXPORT repack_version(PG_FUNCTION_ARGS);
 extern Datum PGUT_EXPORT repack_trigger(PG_FUNCTION_ARGS);

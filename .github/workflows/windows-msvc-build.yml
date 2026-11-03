@@ -120,6 +120,7 @@ jobs:
             echo ---- DIAG preprocess of repack.c >> build.log
             cl /nologo /E %DEFS% %INC% /I lib /I . lib\repack.c 2>&1 | findstr /C:"Pg_magic" /C:"PG_MODULE_MAGIC" >> build.log
             findstr /N /C:"PG_MODULE_MAGIC_DATA" "%PGROOT%\include\server\fmgr.h" >> build.log
+            cl /nologo /E %DEFS% %INC% /I lib /I . lib\repack.c 2>&1 | findstr /R /C:"^#line.*fmgr.h" >> build.log
             exit /b 1
           )
 
