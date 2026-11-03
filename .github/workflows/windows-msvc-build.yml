@@ -72,20 +72,35 @@ jobs:
         shell: cmd
         run: |
           mkdir dist
+          echo build log > build.log
           set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal"
           set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN /Zc:preprocessor
 
           rem ---- client: pg_repack.exe
           cl /nologo /O2 /MD /Fe:dist\pg_repack.exe %DEFS% /DFRONTEND %INC% /I bin /I . ^
              bin\pg_repack.c bin\pgut\pgut.c bin\pgut\pgut-fe.c ^
-             /link "%LIBPQ_LIB%" "%PGCOMMON_LIB%" "%PGPORT_LIB%" ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib
+             /link "%LIBPQ_LIB%" "%PGCOMMON_LIB%" "%PGPORT_LIB%" ws2_32.lib secur32.lib advapi32.lib shell32.lib user32.lib bcrypt.lib crypt32.lib >> build.log 2>&1
           if errorlevel 1 exit /b 1
 
           rem ---- server extension: pg_repack.dll
           cl /nologo /O2 /MD /LD /Fe:dist\pg_repack.dll %DEFS% %INC% /I lib /I . ^
              lib\repack.c lib\pgut\pgut-spi.c ^
-             /link "%POSTGRES_LIB%" ws2_32.lib
-          if errorlevel 1 exit /b 1
+             /link "%POSTGRES_LIB%" ws2_32.lib >> build.log 2>&1
+          if errorlevel 1 (
+            echo ---- DIAG preprocess of repack.c >> build.log
+            cl /nologo /E %DEFS% %INC% /I lib /I . lib\repack.c 2>&1 | findstr /C:"Pg_magic" /C:"PG_MODULE_MAGIC" >> build.log
+            findstr /N /C:"PG_MODULE_MAGIC_DATA" "%PGROOT%\include\server\fmgr.h" >> build.log
+            exit /b 1
+          )
+
+      - name: Report compiler errors as annotations
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build.log) {
+            Get-Content build.log | Where-Object { $_ -match 'error|LNK|Pg_magic|PG_MODULE_MAGIC' } |
+              Select-Object -First 25 | ForEach-Object { "::error::" + ($_ -replace '[\r\n]','') }
+          }
 
       - name: Generate extension SQL and control files
         shell: pwsh
