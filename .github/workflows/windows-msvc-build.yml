@@ -73,7 +73,7 @@ jobs:
         run: |
           mkdir dist
           set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal"
-          set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN
+          set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN /Zc:preprocessor
 
           rem ---- client: pg_repack.exe
           cl /nologo /O2 /MD /Fe:dist\pg_repack.exe %DEFS% /DFRONTEND %INC% /I bin /I . ^
