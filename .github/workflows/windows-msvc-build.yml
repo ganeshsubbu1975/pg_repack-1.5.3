@@ -26,7 +26,17 @@ jobs:
           choco install winflexbison3 --yes --no-progress
           meson --version
 
+      - name: Restore cached PostgreSQL build
+        id: pgcache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            C:\pgsql18
+            pgsrc\build
+          key: pg-${{ env.PG_VERSION }}-msvc-v1
+
       - name: Download PostgreSQL source
+        if: steps.pgcache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $v = $env:PG_VERSION
@@ -35,18 +45,38 @@ jobs:
           Rename-Item "postgresql-$v" pgsrc
 
       - name: Build and install PostgreSQL (headers and libs)
+        id: pgbuild
+        if: steps.pgcache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
+          echo pg build log > pgbuild.log
           cd pgsrc
-          meson setup build --prefix=%PGROOT% --buildtype=release -Dnls=disabled -Dssl=none -Dzlib=disabled -Dicu=disabled -Dreadline=disabled -Dlz4=disabled -Dzstd=disabled -Dtap_tests=disabled
+          meson setup build --prefix=%PGROOT% --buildtype=release -Dnls=disabled -Dssl=none -Dzlib=disabled -Dicu=disabled -Dreadline=disabled -Dlz4=disabled -Dzstd=disabled -Dtap_tests=disabled >> ..\pgbuild.log 2>&1
           if errorlevel 1 exit /b 1
-          meson compile -C build
+          meson compile -C build >> ..\pgbuild.log 2>&1
           if errorlevel 1 exit /b 1
-          meson install -C build
+          meson install -C build >> ..\pgbuild.log 2>&1
           if errorlevel 1 exit /b 1
           rem meson does not install postgres_fe.h; add it next to the installed server headers
-          copy /Y src\include\postgres_fe.h "%PGROOT%\include\server\"
+          copy /Y src\include\postgres_fe.h "%PGROOT%\include\server\" >> ..\pgbuild.log 2>&1
           if errorlevel 1 exit /b 1
+
+      - name: Report PostgreSQL build errors as annotations
+        if: failure() && steps.pgbuild.outcome == 'failure'
+        shell: pwsh
+        run: |
+          if (Test-Path pgbuild.log) {
+            Get-Content pgbuild.log -Tail 25 | ForEach-Object { "::error::" + ($_ -replace '[\r\n]','') }
+          }
+
+      - name: Save PostgreSQL build to cache
+        if: steps.pgbuild.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\pgsql18
+            pgsrc\build
+          key: pg-${{ env.PG_VERSION }}-msvc-v1
 
       - name: Locate PostgreSQL libraries
         shell: pwsh
