@@ -44,6 +44,9 @@ jobs:
           if errorlevel 1 exit /b 1
           meson install -C build
           if errorlevel 1 exit /b 1
+          rem meson does not install postgres_fe.h; add it next to the installed server headers
+          copy /Y src\include\postgres_fe.h "%PGROOT%\include\server\"
+          if errorlevel 1 exit /b 1
 
       - name: Locate PostgreSQL libraries
         shell: pwsh
@@ -69,7 +72,7 @@ jobs:
         shell: cmd
         run: |
           mkdir dist
-          set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal" /I"%CD%\pgsrc\src\include" /I"%CD%\pgsrc\build\src\include"
+          set INC=/I"%PGROOT%\include" /I"%PGROOT%\include\server" /I"%PGROOT%\include\server\port\win32_msvc" /I"%PGROOT%\include\server\port\win32" /I"%PGROOT%\include\internal"
           set DEFS=/DREPACK_VERSION=%REPACK_VERSION% /D_CRT_SECURE_NO_WARNINGS /DWIN32_LEAN_AND_MEAN
 
           rem ---- client: pg_repack.exe
